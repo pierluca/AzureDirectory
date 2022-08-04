@@ -1,8 +1,6 @@
-﻿using Microsoft.Azure.Storage;
-using Microsoft.Azure.Storage.Blob;
+﻿using Microsoft.Azure.Storage.Blob;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
@@ -10,15 +8,13 @@ namespace Lucene.Net.Store.Azure
 {
   public class AzureDirectory : Directory
   {
-    private string _containerName;
     private string _rootFolder;
-    private CloudBlobClient _blobClient;
     private CloudBlobContainer _blobContainer;
     private Directory _cacheDirectory;
     private LockFactory _lockFactory = new NativeFSLockFactory();
     public override LockFactory LockFactory => _lockFactory;
-    public string CacheDirectoryPath { get; set; }
-    public string CatalogPath { get; set; }
+
+    public string CatalogPath { get; set; } = "/";
 
     /// <summary>
     /// Create an AzureDirectory
@@ -28,26 +24,23 @@ namespace Lucene.Net.Store.Azure
     /// <param name="cacheDirectory">local Directory object to use for local cache</param>
     /// <param name="rootFolder">path of the root folder inside the container</param>
     public AzureDirectory(
-        CloudStorageAccount storageAccount,
-        string cacheDirectoryPath,
-        string containerName = null,
-        //Directory cacheDirectory = null,
-        bool compressBlobs = false,
-        string rootFolder = null
-        )
+      Uri blobContainerSasToken,
+      Directory cacheDirectory,
+      bool compressBlobs = false,
+      string rootFolder = null
+    )
     {
-      CacheDirectoryPath = cacheDirectoryPath;
-      if (storageAccount == null)
-        throw new ArgumentNullException("storageAccount");
+      _cacheDirectory = cacheDirectory ?? throw new ArgumentNullException(nameof(cacheDirectory));
 
-      if (string.IsNullOrEmpty(containerName))
-        _containerName = "lucene";
-      else
-        _containerName = containerName.ToLower();
-
+      if (blobContainerSasToken == null)
+      {
+        throw new ArgumentNullException(nameof(blobContainerSasToken));
+      }
 
       if (string.IsNullOrEmpty(rootFolder))
+      {
         _rootFolder = string.Empty;
+      }
       else
       {
         rootFolder = rootFolder.Trim('/');
@@ -55,10 +48,9 @@ namespace Lucene.Net.Store.Azure
       }
 
 
-      _blobClient = storageAccount.CreateCloudBlobClient();
-      //_initCacheDirectory(cacheDirectory);
-      _initCacheDirectory(null);
-      this.CompressBlobs = compressBlobs;
+      _blobContainer = new CloudBlobContainer(blobContainerSasToken);
+
+      CompressBlobs = compressBlobs;
     }
 
     public CloudBlobContainer BlobContainer
@@ -95,37 +87,9 @@ namespace Lucene.Net.Store.Azure
       }
     }
 
-    private void _initCacheDirectory(Directory cacheDirectory)
-    {
-      if (cacheDirectory != null)
-      {
-        // save it off
-        _cacheDirectory = cacheDirectory;
-      }
-      else
-      {
-        var cachePath = CacheDirectoryPath;
-        if (string.IsNullOrEmpty(cachePath))
-          Path.Combine(Path.GetPathRoot(Environment.SystemDirectory), "AzureDirectory");
-        var azureDir = new DirectoryInfo(cachePath);
-        if (!azureDir.Exists)
-          azureDir.Create();
-
-        CatalogPath = Path.Combine(cachePath, _containerName);
-        var catalogDir = new DirectoryInfo(CatalogPath);
-        if (!catalogDir.Exists)
-          catalogDir.Create();
-
-        _cacheDirectory = FSDirectory.Open(CatalogPath);
-      }
-
-      CreateContainer();
-    }
-
     public void CreateContainer()
     {
-      _blobContainer = _blobClient.GetContainerReference(_containerName);
-      _blobContainer.CreateIfNotExistsAsync().Wait();
+      // NO-OP
     }
 
     /// <summary>Returns an array of strings, one for each file in the directory. </summary>
@@ -291,7 +255,6 @@ namespace Lucene.Net.Store.Azure
     protected override void Dispose(bool disposing)
     {
       _blobContainer = null;
-      _blobClient = null;
     }
 
     public virtual bool ShouldCompressFile(string path)
