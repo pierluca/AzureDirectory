@@ -1,9 +1,7 @@
-[![Build status](https://ci.appveyor.com/api/projects/status/87h8usb13l8reiaa?svg=true)](https://ci.appveyor.com/project/richorama/azuredirectory)
-
 # AzureDirectory Library for Lucene.Net
 
-A fork of this project: https://azuredirectory.codeplex.com/
-Updated to work with Lucene 3.0.3, and version 2.1.0.3 of the Azure Storage client.
+A fork of this project: https://github.com/azure-contrib/AzureDirectory
+Updated to work with a blob container SAS token
 
 ## Project description
 

@@ -9,6 +9,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Text;
 using Lucene.Net.Analysis.Standard;
+using Lucene.Net.Store;
 
 namespace AzureDirectory.Tests
 {
@@ -23,20 +24,55 @@ namespace AzureDirectory.Tests
       this.connectionString = System.Environment.GetEnvironmentVariable("DataConnectionString") ?? "UseDevelopmentStorage=true";
     }
 
+    /// <summary>
+    /// Create a container and return a SAS-enabled URI for it
+    /// </summary>
+    /// <param name="account"></param>
+    /// <param name="containerName"></param>
+    /// <returns></returns>
+    private Uri CreateBlobContainerUri(CloudBlobClient client, string containerName)
+    {
+      var blobContainer = client.GetContainerReference(containerName);
+      blobContainer.CreateIfNotExistsAsync().Wait();
 
+
+      var sasPolicy = new SharedAccessBlobPolicy
+      {
+        SharedAccessStartTime = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1),
+        SharedAccessExpiryTime = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5),
+        Permissions = SharedAccessBlobPermissions.Add | SharedAccessBlobPermissions.Create |
+                      SharedAccessBlobPermissions.Delete | SharedAccessBlobPermissions.List |
+                      SharedAccessBlobPermissions.Read | SharedAccessBlobPermissions.Write
+      };
+
+      var sasToken = blobContainer.GetSharedAccessSignature(sasPolicy);
+
+      var blobUriBuilder = new UriBuilder(blobContainer.Uri);
+      blobUriBuilder.Query = sasToken;
+
+      return blobUriBuilder.Uri;
+    }
+
+    /// <remarks>
+    /// If not using VS 2022, run Azurite in parallel to this test. Otherwise, it'll fail.
+    /// </remarks>
     [TestMethod]
     public void TestReadAndWrite()
     {
+      // Setup the container in the storage account as needed
       var cloudStorageAccount = CloudStorageAccount.Parse(connectionString);
-
+      var cloudBlobClient = cloudStorageAccount.CreateCloudBlobClient();
       const string containerName = "testcatalog2";
+      var blobUri = CreateBlobContainerUri(cloudBlobClient, containerName);
 
-      var azureDirectory = new Lucene.Net.Store.Azure.AzureDirectory(cloudStorageAccount, "temp", containerName: containerName);
+      // Create the object under test
+      var azureDirectory = new Lucene.Net.Store.Azure.AzureDirectory(blobUri, new RAMDirectory());
 
+      // ... and test !
       var indexWriterConfig = new IndexWriterConfig(
           Lucene.Net.Util.LuceneVersion.LUCENE_48,
           new StandardAnalyzer(Lucene.Net.Util.LuceneVersion.LUCENE_48));
-      
+
       int dog = 0, cat = 0, car = 0;
 
       using (var indexWriter = new IndexWriter(azureDirectory, indexWriterConfig))
@@ -80,9 +116,8 @@ namespace AzureDirectory.Tests
       }
       finally
       {
-        // check the container exists, and delete it
-        var blobClient = cloudStorageAccount.CreateCloudBlobClient();
-        var container = blobClient.GetContainerReference(containerName);
+        // clean-up after the test, checking the container exists, and deleting it
+        var container = cloudBlobClient.GetContainerReference(containerName);
         Assert.IsTrue(container.Exists()); // check the container exists
         container.Delete();
       }
